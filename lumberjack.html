@@ -61,10 +61,11 @@
     #game {
       position: fixed;
       left: 0;
-      top: 32px; /* примерно высота UI, дальше поправим в JS */
+      top: 0;
+      z-index: 1;
     }
 
-    /* Простенький виртуальный джойстик для телефона */
+    /* Виртуальный джойстик для телефона */
     #joystick-base {
       position: fixed;
       left: 16px;
@@ -74,7 +75,7 @@
       border-radius: 50%;
       border: 2px solid rgba(255, 255, 255, 0.2);
       background: rgba(0, 0, 0, 0.25);
-      display: none; /* показываем, когда палец на экране */
+      display: none;
       z-index: 20;
     }
 
@@ -119,9 +120,7 @@
 
     function resizeCanvas() {
       canvas.width = window.innerWidth;
-      const uiHeight = ui.getBoundingClientRect().height;
-      canvas.height = window.innerHeight - uiHeight;
-      canvas.style.top = uiHeight + 'px';
+      canvas.height = window.innerHeight;
     }
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
@@ -131,7 +130,7 @@
       x: canvas.width / 2,
       y: canvas.height / 2,
       speed: 2.2,
-      radius: 40, // радиус рубки
+      radius: 40,
       size: 18
     };
 
@@ -142,7 +141,7 @@
     const maxTrees = 12;
 
     function spawnTree() {
-      const margin = 40;
+      const margin = 60;
       const x = margin + Math.random() * (canvas.width - margin * 2);
       const y = margin + Math.random() * (canvas.height - margin * 2);
       const size = 16 + Math.random() * 10;
@@ -194,7 +193,6 @@
 
     function onTouchStart(e) {
       for (const t of e.changedTouches) {
-        // Берём первый палец слева снизу
         if (touchId === null) {
           touchId = t.identifier;
           joyCenter = { x: t.clientX, y: t.clientY };
@@ -259,8 +257,8 @@
     upgradeBtn.addEventListener('click', () => {
       if (coins >= upgradeCost) {
         coins -= upgradeCost;
-        player.radius += 10;         // +10 к радиусу
-        upgradeCost = Math.round(upgradeCost * 1.8); // рост цены
+        player.radius += 10;
+        upgradeCost = Math.round(upgradeCost * 1.8);
         updateUI();
       }
     });
@@ -275,7 +273,6 @@
     }
 
     function update() {
-      // Движение
       let moveX = 0;
       let moveY = 0;
 
@@ -299,21 +296,19 @@
         player.y += moveY * player.speed;
       }
 
-      // Ограничения по границе экрана
       const margin = 10;
       player.x = Math.max(margin, Math.min(canvas.width - margin, player.x));
       player.y = Math.max(margin, Math.min(canvas.height - margin, player.y));
 
       // Рубка деревьев
-      const chopSpeed = 0.8; // скорость снятия HP за кадр
+      const chopSpeed = 0.8;
       for (let i = trees.length - 1; i >= 0; i--) {
         const tree = trees[i];
         const dist = distance(player, tree);
         if (dist < player.radius + tree.size) {
-          // В радиусе действия топора
           tree.hp -= chopSpeed;
           if (tree.hp <= 0) {
-            coins += Math.round(tree.maxHp / 3); // награда
+            coins += Math.round(tree.maxHp / 3);
             trees.splice(i, 1);
             spawnTree();
             updateUI();
@@ -323,19 +318,16 @@
     }
 
     function draw() {
-      // фон
       ctx.fillStyle = '#21512a';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // деревья
       for (const tree of trees) {
-        // ствол/крона
         ctx.beginPath();
         ctx.arc(tree.x, tree.y, tree.size, 0, Math.PI * 2);
         ctx.fillStyle = '#2ecc71';
         ctx.fill();
 
-        // HP бар над деревом
         const barWidth = tree.size * 2;
         const barHeight = 4;
         const hpRatio = tree.hp / tree.maxHp;
@@ -358,7 +350,7 @@
       ctx.fillStyle = '#3498db';
       ctx.fill();
 
-      // "топор" как маленький кружочек сбоку от игрока
+      // "топор"
       ctx.beginPath();
       ctx.arc(player.x + player.size, player.y - player.size / 2, 6, 0, Math.PI * 2);
       ctx.fillStyle = '#f1c40f';
