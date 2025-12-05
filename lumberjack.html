@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Лесоруб — мини-игра</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #1b1b1b;
+      color: #fff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+
+    #ui {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      padding: 8px 10px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(6px);
+      z-index: 10;
+      font-size: 14px;
+    }
+
+    #ui-left {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    #upgradeBtn {
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: none;
+      background: #ffb300;
+      color: #000;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #upgradeBtn:disabled {
+      background: #555;
+      color: #aaa;
+      cursor: default;
+    }
+
+    #game {
+      position: fixed;
+      left: 0;
+      top: 32px; /* примерно высота UI, дальше поправим в JS */
+    }
+
+    /* Простенький виртуальный джойстик для телефона */
+    #joystick-base {
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      width: 90px;
+      height: 90px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      background: rgba(0, 0, 0, 0.25);
+      display: none; /* показываем, когда палец на экране */
+      z-index: 20;
+    }
+
+    #joystick-stick {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(255, 255, 255, 0.5);
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div id="ui-left">
+      <div>💰 Монеты: <span id="coins">0</span></div>
+      <div>🪓 Радиус: <span id="radiusDisplay">40</span></div>
+    </div>
+    <button id="upgradeBtn">Улучшить топор (10)</button>
+  </div>
+
+  <div id="joystick-base">
+    <div id="joystick-stick"></div>
+  </div>
+
+  <canvas id="game"></canvas>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    const ui = document.getElementById('ui');
+    const coinsSpan = document.getElementById('coins');
+    const radiusSpan = document.getElementById('radiusDisplay');
+    const upgradeBtn = document.getElementById('upgradeBtn');
+
+    const joystickBase = document.getElementById('joystick-base');
+    const joystickStick = document.getElementById('joystick-stick');
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      const uiHeight = ui.getBoundingClientRect().height;
+      canvas.height = window.innerHeight - uiHeight;
+      canvas.style.top = uiHeight + 'px';
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // --------- Игровое состояние ---------
+    const player = {
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      speed: 2.2,
+      radius: 40, // радиус рубки
+      size: 18
+    };
+
+    let coins = 0;
+    let upgradeCost = 10;
+
+    const trees = [];
+    const maxTrees = 12;
+
+    function spawnTree() {
+      const margin = 40;
+      const x = margin + Math.random() * (canvas.width - margin * 2);
+      const y = margin + Math.random() * (canvas.height - margin * 2);
+      const size = 16 + Math.random() * 10;
+      const hp = size * 3;
+      trees.push({
+        x,
+        y,
+        size,
+        hp,
+        maxHp: hp
+      });
+    }
+
+    function ensureTrees() {
+      while (trees.length < maxTrees) {
+        spawnTree();
+      }
+    }
+    ensureTrees();
+
+    // --------- Управление: клавиатура ---------
+    const keys = {
+      ArrowUp: false,
+      ArrowDown: false,
+      ArrowLeft: false,
+      ArrowRight: false,
+      KeyW: false,
+      KeyA: false,
+      KeyS: false,
+      KeyD: false
+    };
+
+    window.addEventListener('keydown', (e) => {
+      if (keys.hasOwnProperty(e.code)) {
+        keys[e.code] = true;
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (keys.hasOwnProperty(e.code)) {
+        keys[e.code] = false;
+      }
+    });
+
+    // --------- Управление: тач / джойстик ---------
+    let touchId = null;
+    let joyCenter = { x: 0, y: 0 };
+    let joyDir = { x: 0, y: 0 };
+
+    function onTouchStart(e) {
+      for (const t of e.changedTouches) {
+        // Берём первый палец слева снизу
+        if (touchId === null) {
+          touchId = t.identifier;
+          joyCenter = { x: t.clientX, y: t.clientY };
+          joystickBase.style.left = (joyCenter.x - 45) + 'px';
+          joystickBase.style.top = (joyCenter.y - 45) + 'px';
+          joystickBase.style.display = 'block';
+          joystickStick.style.transform = 'translate(-50%, -50%)';
+          joyDir = { x: 0, y: 0 };
+          break;
+        }
+      }
+    }
+
+    function onTouchMove(e) {
+      if (touchId === null) return;
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        if (t.identifier === touchId) {
+          const dx = t.clientX - joyCenter.x;
+          const dy = t.clientY - joyCenter.y;
+          const maxDist = 35;
+          let dist = Math.sqrt(dx * dx + dy * dy);
+          let nx = 0, ny = 0;
+
+          if (dist > 0) {
+            nx = dx / dist;
+            ny = dy / dist;
+          }
+          if (dist > maxDist) dist = maxDist;
+
+          joystickStick.style.left = 45 + (nx * dist) + 'px';
+          joystickStick.style.top = 45 + (ny * dist) + 'px';
+
+          joyDir = { x: nx, y: ny };
+        }
+      }
+    }
+
+    function onTouchEnd(e) {
+      for (const t of e.changedTouches) {
+        if (t.identifier === touchId) {
+          touchId = null;
+          joystickBase.style.display = 'none';
+          joyDir = { x: 0, y: 0 };
+        }
+      }
+    }
+
+    window.addEventListener('touchstart', onTouchStart, { passive: false });
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd, { passive: false });
+    window.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+    // --------- Логика улучшения ---------
+    function updateUI() {
+      coinsSpan.textContent = coins.toFixed(0);
+      radiusSpan.textContent = player.radius.toFixed(0);
+      upgradeBtn.textContent = `Улучшить топор (${upgradeCost})`;
+      upgradeBtn.disabled = coins < upgradeCost;
+    }
+
+    upgradeBtn.addEventListener('click', () => {
+      if (coins >= upgradeCost) {
+        coins -= upgradeCost;
+        player.radius += 10;         // +10 к радиусу
+        upgradeCost = Math.round(upgradeCost * 1.8); // рост цены
+        updateUI();
+      }
+    });
+
+    updateUI();
+
+    // --------- Игровой цикл ---------
+    function distance(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function update() {
+      // Движение
+      let moveX = 0;
+      let moveY = 0;
+
+      // Клавиатура
+      if (keys.ArrowUp || keys.KeyW) moveY -= 1;
+      if (keys.ArrowDown || keys.KeyS) moveY += 1;
+      if (keys.ArrowLeft || keys.KeyA) moveX -= 1;
+      if (keys.ArrowRight || keys.KeyD) moveX += 1;
+
+      // Джойстик (тач)
+      if (touchId !== null) {
+        moveX = joyDir.x;
+        moveY = joyDir.y;
+      }
+
+      let len = Math.sqrt(moveX * moveX + moveY * moveY);
+      if (len > 0) {
+        moveX /= len;
+        moveY /= len;
+        player.x += moveX * player.speed;
+        player.y += moveY * player.speed;
+      }
+
+      // Ограничения по границе экрана
+      const margin = 10;
+      player.x = Math.max(margin, Math.min(canvas.width - margin, player.x));
+      player.y = Math.max(margin, Math.min(canvas.height - margin, player.y));
+
+      // Рубка деревьев
+      const chopSpeed = 0.8; // скорость снятия HP за кадр
+      for (let i = trees.length - 1; i >= 0; i--) {
+        const tree = trees[i];
+        const dist = distance(player, tree);
+        if (dist < player.radius + tree.size) {
+          // В радиусе действия топора
+          tree.hp -= chopSpeed;
+          if (tree.hp <= 0) {
+            coins += Math.round(tree.maxHp / 3); // награда
+            trees.splice(i, 1);
+            spawnTree();
+            updateUI();
+          }
+        }
+      }
+    }
+
+    function draw() {
+      // фон
+      ctx.fillStyle = '#21512a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // деревья
+      for (const tree of trees) {
+        // ствол/крона
+        ctx.beginPath();
+        ctx.arc(tree.x, tree.y, tree.size, 0, Math.PI * 2);
+        ctx.fillStyle = '#2ecc71';
+        ctx.fill();
+
+        // HP бар над деревом
+        const barWidth = tree.size * 2;
+        const barHeight = 4;
+        const hpRatio = tree.hp / tree.maxHp;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(tree.x - barWidth / 2, tree.y - tree.size - 8, barWidth, barHeight);
+        ctx.fillStyle = '#e74c3c';
+        ctx.fillRect(tree.x - barWidth / 2, tree.y - tree.size - 8, barWidth * hpRatio, barHeight);
+      }
+
+      // радиус топора
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // игрок
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+      ctx.fillStyle = '#3498db';
+      ctx.fill();
+
+      // "топор" как маленький кружочек сбоку от игрока
+      ctx.beginPath();
+      ctx.arc(player.x + player.size, player.y - player.size / 2, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#f1c40f';
+      ctx.fill();
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    loop();
+  </script>
+</body>
+</html>
